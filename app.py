@@ -1,6 +1,7 @@
 """Streamlit demo for a fine-tuned DistilGPT-2 poetry model."""
 
 import os
+import re
 
 import streamlit as st
 import torch
@@ -18,6 +19,12 @@ def configured_model_id():
         return st.secrets.get("HF_MODEL_ID", os.getenv("HF_MODEL_ID", ""))
     except Exception:
         return os.getenv("HF_MODEL_ID", "")
+
+
+def put_each_sentence_on_a_line(text):
+    """Keep poem lines and split any remaining sentences onto separate lines."""
+    sentences = re.split(r"(?<=[.!?])\s+|\n+", text.strip())
+    return "\n".join(sentence.strip() for sentence in sentences if sentence.strip())
 
 
 @st.cache_resource(show_spinner="Loading the poetry model…")
@@ -40,11 +47,11 @@ model_id = st.text_input(
 )
 
 prompt = st.text_area(
-    "Poem prompt",
-    value="Under the old tree,",
+    "Poem topic or opening phrase",
+    value="The moon over a quiet lake",
     height=100,
     max_chars=300,
-    help="A short starting phrase gives the model a direction.",
+    help="Give a theme or opening phrase. The app asks for metaphors and separate sentence lines.",
 )
 col1, col2 = st.columns(2)
 with col1:
@@ -60,7 +67,14 @@ if st.button("Generate poem", type="primary", use_container_width=True):
     else:
         try:
             tokenizer, model = load_model(model_id.strip())
-            inputs = tokenizer(prompt.strip(), return_tensors="pt")
+            instruction = (
+                "Write an original poem using vivid imagery and at least two clear metaphors. "
+                "Put each complete sentence on its own line. End each sentence with punctuation. "
+                "Output only the poem.\n"
+                f"Topic or opening phrase: {prompt.strip()}\n"
+                "Poem:\n"
+            )
+            inputs = tokenizer(instruction, return_tensors="pt")
             with torch.inference_mode():
                 output = model.generate(
                     **inputs,
@@ -74,9 +88,11 @@ if st.button("Generate poem", type="primary", use_container_width=True):
                     pad_token_id=tokenizer.eos_token_id,
                     eos_token_id=tokenizer.eos_token_id,
                 )
-            poem = tokenizer.decode(output[0], skip_special_tokens=True)
+            new_tokens = output[0, inputs["input_ids"].shape[1]:]
+            generated_text = tokenizer.decode(new_tokens, skip_special_tokens=True)
+            poem = put_each_sentence_on_a_line(generated_text)
             st.subheader("Your poem")
-            st.write(poem)
+            st.text(poem)
         except Exception as error:
             st.error(f"Could not load or run this model: {error}")
 
